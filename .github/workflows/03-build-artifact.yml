@@ -3,7 +3,9 @@
 name: 03 Build Artifact Workflow
 
 on:
-  # Students start this workflow manually from the Actions tab.
+  push:
+    branches:
+      - main
   workflow_dispatch:
 
 env:
