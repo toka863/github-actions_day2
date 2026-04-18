@@ -1,64 +1,49 @@
-# This workflow packages the verified app.
-# It is manual on purpose so Day 1 stays focused on CI.
-name: 03 Build Artifact Workflow
+name: 03 Build & Push to ECR
 
 on:
   push:
     branches:
       - main
+
   workflow_dispatch:
 
 env:
-  # Keep common image values in one place so the build steps stay readable.
   IMAGE_NAME: tiny-health-app
-  IMAGE_TAR: tiny-health-app.tar
-  ARTIFACT_NAME: tiny-health-app-image
 
 jobs:
-  build-package:
-    # Use a fresh GitHub-hosted runner for the build.
+  build:
     runs-on: ubuntu-latest
 
     steps:
       - name: Check out repository
-        # Get the repository files onto the runner.
-        uses: actions/checkout@v6
+        uses: actions/checkout@v4
 
-      - name: Set up Python
-        # Prepare Python so the workflow can run the tests first.
-        uses: actions/setup-python@v6
+      # AWS credentials from GitHub Secrets
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
         with:
-          python-version: "3.12"
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
 
-      - name: Run tests
-        # Build only after the verification step passes.
-        run: python -m unittest discover -s tests -v
+      # Login to ECR
+      - name: Login to Amazon ECR
+        uses: aws-actions/amazon-ecr-login@v2
 
-      - name: Set image tag
-        # Use today's UTC date plus the GitHub run ID.
-        # This keeps the tag easy to explain and still unique for the run.
-        id: image-tag
+      # Build Docker image
+      - name: Build Docker image
+        run: docker build -t $IMAGE_NAME .
+
+      # Tag image for ECR
+      - name: Tag image
         run: |
-          TODAY="$(date -u +%Y-%m-%d)"
-          IMAGE_TAG="${TODAY}-${GITHUB_RUN_ID}"
-          echo "image_tag=$IMAGE_TAG" >> "$GITHUB_OUTPUT"
-
-      - name: Build Docker image with docker build
-        # Create the packaged application image with one traceable tag.
-        # The deploy workflow will run this exact same tag later.
+          docker tag $IMAGE_NAME:latest \
+          ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/$IMAGE_NAME:latest
+      - name: Create ECR repository if not exists
         run: |
-          docker build \
-            -t "${IMAGE_NAME}:${{ steps.image-tag.outputs.image_tag }}" \
-            .
-
-      - name: Save Docker image as artifact file
-        # Convert that exact tagged image into a file that can be reused later.
-        run: docker save "${IMAGE_NAME}:${{ steps.image-tag.outputs.image_tag }}" -o "${IMAGE_TAR}"
-
-      - name: Upload build artifact
-        # Store the packaged output so a later workflow can use the exact same package.
-        uses: actions/upload-artifact@v4
-        with:
-          name: ${{ env.ARTIFACT_NAME }}
-          path: ${{ env.IMAGE_TAR }}
-          retention-days: 7
+         aws ecr describe-repositories --repository-names $IMAGE_NAME || \
+         aws ecr create-repository --repository-name $IMAGE_NAME
+      # Push image to ECR
+      - name: Push image to ECR
+        run: |
+          docker push ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/$IMAGE_NAME:latest
