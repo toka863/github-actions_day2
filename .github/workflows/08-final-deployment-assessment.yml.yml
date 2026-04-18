@@ -1,0 +1,121 @@
+name: 08 Final Deployment Assessment
+
+on:
+  workflow_dispatch:
+
+env:
+  IMAGE_NAME: tiny-health-app
+
+jobs:
+
+  # -------------------------
+  # VERIFY
+  # -------------------------
+  verify:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.12"
+
+      - name: Run tests
+        run: python -m unittest discover -s tests -v
+
+  # -------------------------
+  # PREPARE OUTPUT
+  # -------------------------
+  prepare-output:
+    needs: verify
+    runs-on: ubuntu-latest
+
+    outputs:
+      image_tag: ${{ steps.image-tag.outputs.image_tag }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Create image tag
+        id: image-tag
+        run: |
+          TODAY=$(date -u +%Y-%m-%d)
+          IMAGE_TAG="${TODAY}-${GITHUB_RUN_ID}"
+          echo "image_tag=$IMAGE_TAG" >> $GITHUB_OUTPUT
+
+      - name: Log image tag
+        run: |
+          echo "Image tag: ${{ steps.image-tag.outputs.image_tag }}"
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build Docker image
+        run: |
+          docker build -t ${{ secrets.DOCKERHUB_USERNAME }}/$IMAGE_NAME:${{ steps.image-tag.outputs.image_tag }} .
+
+      - name: Push Docker image
+        run: |
+          docker push ${{ secrets.DOCKERHUB_USERNAME }}/$IMAGE_NAME:${{ steps.image-tag.outputs.image_tag }}
+
+  # -------------------------
+  # DEPLOY TO VM
+  # -------------------------
+  deploy-to-vm:
+    needs: prepare-output
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.VM_HOST }}
+          username: ${{ secrets.VM_USER }}
+          key: ${{ secrets.VM_SSH_KEY }}
+          script: |
+
+            set -e
+
+            IMAGE="${DOCKERHUB_USERNAME}/${IMAGE_NAME}:${IMAGE_TAG}"
+
+            echo "Pulling image: $IMAGE"
+
+            docker pull $IMAGE
+
+            docker rm -f tiny-health-container || true
+
+            docker run -d \
+              --name tiny-health-container \
+              -p 8000:8000 \
+              -e IMAGE_TAG=${IMAGE_TAG} \
+              -e BUILD_SOURCE="github-actions" \
+              $IMAGE
+
+        env:
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          IMAGE_NAME: ${{ env.IMAGE_NAME }}
+          IMAGE_TAG: ${{ needs.prepare-output.outputs.image_tag }}
+
+  # -------------------------
+  # VALIDATION
+  # -------------------------
+  validate:
+    needs: deploy-to-vm
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Validate /health
+        run: curl --fail http://${{ secrets.VM_HOST }}:8000/health
+
+      - name: Validate /version
+        run: curl --fail http://${{ secrets.VM_HOST }}:8000/version
+
+      - name: Validate /status
+        run: curl --fail http://${{ secrets.VM_HOST }}:8000/status
