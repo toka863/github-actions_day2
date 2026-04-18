@@ -1,0 +1,75 @@
+name: CI + Build + Push to ECR
+
+on:
+  pull_request:
+    branches:
+      - main
+    types: [opened, synchronize, reopened]
+
+  push:
+    branches:
+      - main
+
+  workflow_dispatch:
+
+env:
+  IMAGE_NAME: tiny-health-app
+
+jobs:
+  ci-build-push:
+    runs-on: ubuntu-latest
+
+    steps:
+      # 1️ Checkout
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      # 2️ Setup Python
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.12"
+
+      # 3️ Run tests
+      - name: Run tests
+        run: python -m unittest discover -s tests -v
+
+      
+      # 5️ Configure AWS (ONLY on push to main)
+      - name: Configure AWS credentials
+        if: github.event_name == 'push'
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      # 6️ Login to ECR
+      - name: Login to Amazon ECR
+        if: github.event_name == 'push'
+        uses: aws-actions/amazon-ecr-login@v2
+
+      # 7️ Create repo if not exists
+      - name: Create ECR repository if not exists
+        if: github.event_name == 'push'
+        run: |
+          aws ecr describe-repositories --repository-names $IMAGE_NAME || \
+          aws ecr create-repository --repository-name $IMAGE_NAME
+
+      # 8️ Build Docker image
+      - name: Build Docker image
+        if: github.event_name == 'push'
+        run: docker build -t $IMAGE_NAME .
+
+      # 9️ Tag image
+      - name: Tag image
+        if: github.event_name == 'push'
+        run: |
+          docker tag $IMAGE_NAME:latest \
+          ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/$IMAGE_NAME:latest
+
+      #  Push image
+      - name: Push image to ECR
+        if: github.event_name == 'push'
+        run: |
+          docker push ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/$IMAGE_NAME:latest
