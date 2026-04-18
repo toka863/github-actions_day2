@@ -2,7 +2,7 @@ name: 04 Deploy Workflow
 
 on:
   workflow_run:
-    workflows: ["03 Build & Push to ECR"]
+    workflows: ["CI + Build + Push to ECR"]
     types: [completed]
 
 env:
@@ -26,7 +26,7 @@ jobs:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ secrets.AWS_REGION }}
-          
+
       - name: Login to Amazon ECR
         uses: aws-actions/amazon-ecr-login@v2
 
