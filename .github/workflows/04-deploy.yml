@@ -1,29 +1,21 @@
 name: Deploy on PR
 on:
-  workflow_run:
-    workflows: ["CI + Build + Push to ECR"]  # must match the exact name
-    types: [completed]
+  pull_request:
     branches: [main]
-
-env:
-  IMAGE_NAME: tiny-health-app
-  CONTAINER_NAME: tiny-health-container
-  APP_PORT: "8000"
+    types: [opened, synchronize, reopened]
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    if: ${{ github.event.workflow_run.conclusion == 'success' }}  # only deploy if build passed
+    needs: []
     steps:
-      - name: Download PR number
-        uses: actions/download-artifact@v4
+      - name: Wait for CI to complete
+        uses: lewagon/wait-on-check-action@v1.3.1
         with:
-          name: pr-number
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          run-id: ${{ github.event.workflow_run.id }}   # ← fetch from the triggering run
-
-      - name: Set PR number
-        run: echo "PR_NUMBER=$(cat pr_number.txt)" >> $GITHUB_ENV
+          ref: ${{ github.event.pull_request.head.sha }}
+          check-name: ci-build-push
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+          wait-interval: 10
 
       - name: Deploy to EC2 via SSH
         uses: appleboy/ssh-action@v1
@@ -31,28 +23,26 @@ jobs:
           host: ${{ secrets.VM_HOST }}
           username: ${{ secrets.VM_USER }}
           key: ${{ secrets.VM_SSH_KEY }}
-          envs: PR_NUMBER,AWS_REGION,AWS_ACCOUNT_ID,IMAGE_NAME,CONTAINER_NAME,APP_PORT 
+          envs: PR_NUMBER,AWS_REGION,AWS_ACCOUNT_ID
           script: |
             set -e
             IMAGE_TAG=pr-$PR_NUMBER
+            FULL_IMAGE=${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/tiny-health-app:$IMAGE_TAG
+
             aws ecr get-login-password --region ${AWS_REGION} | \
               docker login --username AWS --password-stdin \
               ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com
-            docker pull ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${IMAGE_NAME}:$IMAGE_TAG
-            docker rm -f ${CONTAINER_NAME} || true
-            docker run -d \
-              --name ${CONTAINER_NAME} \
-              -p ${APP_PORT}:8000 \
-              ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${IMAGE_NAME}:$IMAGE_TAG
-            sleep 10
-            curl localhost:${APP_PORT}/health || exit 1
-            docker stop ${CONTAINER_NAME}
-            docker rm ${CONTAINER_NAME}
-            echo "PR deployment tested & cleaned ✔️"
+
+            docker pull $FULL_IMAGE
+            docker rm -f tiny-health-container || true
+            docker ps -q --filter "publish=8000" | xargs -r docker rm -f
+            docker run -d --name tiny-health-container -p 8000:8000 $FULL_IMAGE
+            sleep 5
+            curl -f localhost:8000/health || exit 1
+            docker stop tiny-health-container
+            docker rm tiny-health-container
+            echo "PR $IMAGE_TAG tested and cleaned"
         env:
-          PR_NUMBER: ${{ env.PR_NUMBER }}  
-          IMAGE_NAME: tiny-health-app
-          CONTAINER_NAME: tiny-health-container
-          APP_PORT: "8000"
+          PR_NUMBER: ${{ github.event.number }}
           AWS_REGION: ${{ secrets.AWS_REGION }}
           AWS_ACCOUNT_ID: ${{ secrets.AWS_ACCOUNT_ID }}
