@@ -3,7 +3,7 @@ on:
   workflow_run:
     workflows: ["CI + Build + Push to ECR"]  # must match the exact name
     types: [completed]
-    branches: [main]
+    
 
 env:
   IMAGE_NAME: tiny-health-app
