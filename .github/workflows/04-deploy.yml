@@ -31,9 +31,10 @@ jobs:
           host: ${{ secrets.VM_HOST }}
           username: ${{ secrets.VM_USER }}
           key: ${{ secrets.VM_SSH_KEY }}
+          envs: PR_NUMBER,AWS_REGION,AWS_ACCOUNT_ID,IMAGE_NAME,CONTAINER_NAME,APP_PORT 
           script: |
             set -e
-            IMAGE_TAG=pr-${{ env.PR_NUMBER }}
+            IMAGE_TAG=pr-$PR_NUMBER
             aws ecr get-login-password --region ${AWS_REGION} | \
               docker login --username AWS --password-stdin \
               ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com
@@ -49,6 +50,7 @@ jobs:
             docker rm ${CONTAINER_NAME}
             echo "PR deployment tested & cleaned ✔️"
         env:
+          PR_NUMBER: ${{ env.PR_NUMBER }}  
           IMAGE_NAME: tiny-health-app
           CONTAINER_NAME: tiny-health-container
           APP_PORT: "8000"
