@@ -26,6 +26,7 @@ Use these four entry points to navigate the repository:
 - Early labs are browser-first. You do not need local Git to start.
 - Change one thing at a time, especially in YAML files.
 - If a workflow fails, read the logs before changing more files.
+- 
 
 ## Core versus Optional
 

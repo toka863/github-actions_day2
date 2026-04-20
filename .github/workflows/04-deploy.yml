@@ -9,7 +9,7 @@ env:
   IMAGE_NAME: tiny-health-app
   CONTAINER_NAME: tiny-health-container
   APP_PORT: "8000"
-
+  
 jobs:
   deploy:
     runs-on: ubuntu-latest
