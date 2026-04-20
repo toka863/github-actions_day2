@@ -1,62 +1,66 @@
 name: Deploy on PR
 
 on:
- pull_request:
-  branches: [ main ]
+  pull_request:
+    branches: [ main ]
 
 env:
- IMAGE_NAME: tiny-health-app
- CONTAINER_NAME: tiny-health-container
- APP_PORT: "8000"
+  IMAGE_NAME: tiny-health-app
+  CONTAINER_NAME: tiny-health-container
+  APP_PORT: "8000"
 
 jobs:
- deploy:
-  runs-on: ubuntu-latest
+  deploy:
+    runs-on: ubuntu-latest
 
-  steps:
-   - name: Deploy to EC2 via SSH
-     uses: appleboy/ssh-action@v1
-     with:
-      host: ${{ secrets.VM_HOST }}
-      username: ${{ secrets.VM_USER }}
-      key: ${{ secrets.VM_SSH_KEY }}
-      script: |
+    steps:
+      - name: Deploy to EC2 via SSH
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.VM_HOST }}
+          username: ${{ secrets.VM_USER }}
+          key: ${{ secrets.VM_SSH_KEY }}
+          script: |
 
-        set -e
+            set -e
 
-        echo "Connected to VM"
+            echo "Connected to VM"
 
-        IMAGE_TAG=pr-${{ github.event.number }}
+            IMAGE_TAG=pr-${{ github.event.number }}
 
-        # Login to ECR
-        aws ecr get-login-password --region ${AWS_REGION} | \
-        docker login --username AWS --password-stdin \
-        ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com
+            AWS_REGION=${{ secrets.AWS_REGION }}
+            AWS_ACCOUNT_ID=${{ secrets.AWS_ACCOUNT_ID }}
 
-        # Pull image
-        docker pull ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${IMAGE_NAME}:$IMAGE_TAG
+            echo "Logging into ECR..."
 
-        # Remove old container
-        docker rm -f ${CONTAINER_NAME} || true
+            aws ecr get-login-password --region $AWS_REGION | \
+            docker login --username AWS --password-stdin \
+            $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com
 
-        # Run container
-        docker run -d \
-          --name ${CONTAINER_NAME} \
-          -p ${APP_PORT}:8000 \
-          ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${IMAGE_NAME}:$IMAGE_TAG
+            echo "Pulling image..."
 
-        sleep 10
+            docker pull $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/${IMAGE_NAME}:$IMAGE_TAG
 
-        # Validate
-        curl localhost:${APP_PORT}/health || exit 1
+            echo "Stopping old container..."
 
-        # Cleanup
-        docker stop ${CONTAINER_NAME}
-        docker rm ${CONTAINER_NAME}
+            docker rm -f ${CONTAINER_NAME} || true
 
-        echo "PR deployment tested & cleaned ✔️"
+            echo "Running container..."
 
-     env:
-      AWS_REGION: ${{ secrets.AWS_REGION }}
-      AWS_ACCOUNT_ID: ${{ secrets.AWS_ACCOUNT_ID }}
+            docker run -d \
+              --name ${CONTAINER_NAME} \
+              -p ${APP_PORT}:8000 \
+              $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/${IMAGE_NAME}:$IMAGE_TAG
 
+            sleep 10
+
+            echo "Health check..."
+
+            curl -f http://localhost:${APP_PORT}/health || exit 1
+
+            echo "Cleaning up..."
+
+            docker stop ${CONTAINER_NAME}
+            docker rm ${CONTAINER_NAME}
+
+            echo "PR deployment tested & cleaned ✔️"
